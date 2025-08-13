@@ -1,0 +1,126 @@
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression,Ridge,Lasso,ElasticNet
+from sklearn.model_selection import train_test_split, GridSearchCV 
+from sklearn.preprocessing import StandardScaler 
+import matplotlib.pyplot as plt
+from statsmodels.stats.stattools import durbin_watson
+import statsmodels.api as sm
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from sklearn.metrics import r2_score,mean_squared_error,mean_absolute_error
+
+
+
+df = pd.read_csv("train.csv")
+
+
+df["Sex"] = pd.get_dummies(df["Sex"],drop_first = True).astype("int")
+
+
+x = df[["Sex", "Age", "Height", "Weight", "Duration", "Heart_Rate", "Body_Temp"]]
+
+x = x.drop_duplicates()
+
+y = df.loc[x.index, "Calories"]
+
+
+
+q1 = y.quantile(0.25)
+
+q3 = y.quantile(0.75)
+
+iqr = q3 - q1
+
+lower = q1 - 1.5 * iqr
+
+upper = q3 + 1.5 * iqr
+
+
+mask = (y >= lower) & (y <= upper)
+
+new_x = x.copy()
+
+new_y = y.copy()
+
+
+x = x[mask]
+
+y = y[mask]
+
+#i take this sqrt because my target is affected by heavy mamas
+
+y = np.sqrt(y)
+
+x1,x2,y1,y2 = train_test_split(x,y, test_size = 0.2, random_state = 0)
+
+scale = StandardScaler()
+
+x1 = scale.fit_transform(x1)
+
+x2 = scale.transform(x2)
+
+model = LinearRegression(fit_intercept = True)
+
+model.fit(x1,y1)
+
+pred = model.predict(scale.transform(x2))
+
+error = y2 - pred
+
+
+
+def linearity_and_homoschedasticity_check(y2,error):
+    plt.scatter(y2,error,alpha = 0.6)
+    plt.axhline(y = 0, color = "r")
+    plt.show()
+
+def independence_check(error):
+    independence = durbin_watson(error)
+    return independence
+def multicolinearity_check(df):
+    vif = pd.DataFrame()
+    vif["features"] = df.columns
+    vif["vif"] = [variance_inflation_factor(df.values,i) for i in range(df.shape[1])]
+    return vif
+def normality_check(error):
+    plt.hist(error,bins = 50)
+
+def evaluations(y2,pred,x,y):
+    r2 = r2_score(y2,pred)
+    meansq = mean_squared_error(y2,pred)
+    rootmsqe = np.sqrt(meansq)
+    mae = mean_absolute_error(y2,pred)
+    xconst = sm.add_constant(x)
+    model_sm = sm.OLS(y,xconst).fit()
+    fstat = model_sm.fvalue
+    pval = model_sm.f_pvalue
+    coef = model_sm.params
+    return {"r2":r2,"mse": meansq, "root mean square":rootmsqe,"mean absolute error":mae,"coefficients":coef,"p value":pval}
+evaluations(y2,pred,x,y)
+
+alphas = np.logspace(-2,5,10)
+
+def Ridge(x1,y1,x2):
+    grid = GridSearchCV(Ridge(),{"alpha":alphas}, scoring = "r2")
+    grid.fit(x1,y1)
+    alpha = grid.best_params_["alpha"]
+    model_ridge = Ridge(alpha = alpha)
+    model_ridge.fit(x1,y1)
+    ridge_pred = model_ridge.predict(x2)
+    return {"model":model_ridge,"prediction":ridge_pred}
+
+def lasso(x1,y1,x2):
+    grid = GridSearchCV(Lasso(),{"alpha":alphas}, scoring = "r2")
+    grid.fit(x1,y1)
+    alpha = grid.best_params_["alpha"]
+    model_lasso = Lasso(alpha = alpha)
+    model_lasso.fit(x1,y1)
+    lasso_pred = model_lasso.predict(x2)
+    return {"model":model_lasso,"prediction":lasso_pred}
+def elastic(x1,y1,x2):
+    grid = GridSearchCV(ElasticNet (),  {"alpha":alphas}, scoring = "r2")
+    grid.fit(x1,y1)
+    alpha = grid.best_params_["alpha"]
+    model_elastic = ElasticNet(alpha = alpha, l1_ratio = 0.2)
+    model_elastic.fit(x1,y1)
+    elastic_pred = model_elastic.predict(x2)
